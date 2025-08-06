@@ -77,7 +77,7 @@ NEWS_API_SOURCES = {
 }
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"], 
+CORS(app, origins=["*"],  # Allow all origins for production, or specify your Vercel domain
      methods=["GET", "POST", "OPTIONS"], 
      allow_headers=["Content-Type", "Accept", "Authorization"])
 
@@ -443,6 +443,22 @@ def translate_news_if_needed(articles, target_language):
     except Exception as e:
         print(f"Translation error: {e}")
         return articles  # Return original if translation fails
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint to verify the server is running"""
+    return jsonify({
+        "status": "healthy",
+        "message": "GramAroghya Backend is running",
+        "timestamp": datetime.now().isoformat(),
+        "endpoints": [
+            "/ask",
+            "/doctors", 
+            "/health-centers",
+            "/news",
+            "/news-realtime"
+        ]
+    })
 
 @app.route("/ask", methods=["POST"])
 def ask():
