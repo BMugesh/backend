@@ -455,6 +455,7 @@ def health_check():
             "/ask",
             "/doctors", 
             "/hospitals",
+            "/bookings",
             "/health-centers",
             "/news",
             "/news-realtime"
@@ -829,6 +830,74 @@ def find_hospitals():
         set_cache(cache_key, result)
         
         return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/bookings", methods=["POST"])
+def create_booking():
+    """Create a new hospital appointment booking"""
+    try:
+        data = request.json
+        
+        # Validate required fields
+        required_fields = [
+            "patientName", "age", "gender", "phone", 
+            "preferredDate", "preferredTime", "department", 
+            "symptoms", "urgency", "hospital"
+        ]
+        
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+        
+        # Generate booking ID if not provided
+        if not data.get("bookingId"):
+            data["bookingId"] = f"BK{int(time.time())}{data['phone'][-4:]}"
+        
+        # Create booking record
+        booking = {
+            "bookingId": data["bookingId"],
+            "patientName": data["patientName"],
+            "age": data["age"],
+            "gender": data["gender"],
+            "phone": data["phone"],
+            "email": data.get("email", ""),
+            "preferredDate": data["preferredDate"],
+            "preferredTime": data["preferredTime"],
+            "department": data["department"],
+            "symptoms": data["symptoms"],
+            "urgency": data["urgency"],
+            "hospital": data["hospital"],
+            "hospitalAddress": data.get("hospitalAddress", ""),
+            "hospitalPhone": data.get("hospitalPhone", ""),
+            "previousVisit": data.get("previousVisit", False),
+            "status": "Confirmed",
+            "createdAt": datetime.now().isoformat(),
+            "updatedAt": datetime.now().isoformat()
+        }
+        
+        # In a real application, you would save this to a database
+        # For now, we'll just return the booking confirmation
+        
+        return jsonify({
+            "success": True,
+            "message": "Booking created successfully",
+            "booking": booking
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/bookings/<booking_id>", methods=["GET"])
+def get_booking(booking_id):
+    """Get booking details by booking ID"""
+    try:
+        # In a real application, you would fetch from database
+        # For now, return a sample response
+        return jsonify({
+            "error": "Booking retrieval not implemented. Please contact hospital directly."
+        }), 501
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
