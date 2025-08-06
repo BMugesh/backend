@@ -4,12 +4,16 @@ import re
 import ast
 import time
 import hashlib
+import feedparser
+import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import google.generativeai as genai
+from urllib.parse import quote
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")  # Optional NewsAPI key
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -30,9 +34,52 @@ gemini_model = genai.GenerativeModel(
 # Simple in-memory cache for faster responses
 cache = {}
 CACHE_DURATION = 3600  # 1 hour cache
+NEWS_CACHE_DURATION = 300  # 5 minutes cache for news (for real-time updates)
+
+# Health-related RSS feeds for real-time news
+HEALTH_RSS_FEEDS = {
+    'English': [
+        'https://feeds.feedburner.com/ndtvnews-health',
+        'https://timesofindia.indiatimes.com/rssfeeds/3908999.cms',
+        'https://www.thehindu.com/sci-tech/health/feeder/default.rss',
+        'https://indianexpress.com/section/lifestyle/health/feed/',
+    ],
+    'Hindi': [
+        'https://feeds.feedburner.com/ndtvnews-health',
+        'https://navbharattimes.indiatimes.com/rssfeeds/5880659.cms',
+    ],
+    'Tamil': [
+        'https://tamil.thehindu.com/health/feeder/default.rss',
+    ],
+    'Telugu': [
+        'https://telugu.thehindu.com/health/feeder/default.rss',
+    ],
+    'Gujarati': [
+        'https://gujarati.thehindu.com/health/feeder/default.rss',
+    ],
+    'Bengali': [
+        'https://bengali.thehindu.com/health/feeder/default.rss',
+    ],
+    'Marathi': [
+        'https://marathi.thehindu.com/health/feeder/default.rss',
+    ]
+}
+
+# NewsAPI sources for different languages
+NEWS_API_SOURCES = {
+    'English': ['bbc-news', 'reuters', 'the-times-of-india', 'the-hindu'],
+    'Hindi': ['the-times-of-india'],
+    'Tamil': ['the-hindu'],
+    'Telugu': ['the-hindu'],
+    'Gujarati': ['the-times-of-india'],
+    'Bengali': ['the-times-of-india'],
+    'Marathi': ['the-times-of-india']
+}
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"], 
+     methods=["GET", "POST", "OPTIONS"], 
+     allow_headers=["Content-Type", "Accept", "Authorization"])
 
 def get_cache_key(text, prefix=""):
     """Generate cache key from text"""
@@ -237,6 +284,166 @@ def get_route(start_lat, start_lon, end_lat, end_lon):
         "duration": route.get("duration", 0)
     }
 
+def fetch_rss_news(language):
+    """Fetch real-time news from RSS feeds"""
+    feeds = HEALTH_RSS_FEEDS.get(language, HEALTH_RSS_FEEDS.get('English', []))
+    all_articles = []
+    
+    for feed_url in feeds:
+        try:
+            # Parse RSS feed
+            feed = feedparser.parse(feed_url)
+            
+            for entry in feed.entries[:3]:  # Get top 3 articles from each feed
+                # Extract article data
+                title = entry.get('title', 'No title')
+                description = entry.get('summary', entry.get('description', 'No description'))
+                link = entry.get('link', '#')
+                published = entry.get('published', datetime.now().strftime('%Y-%m-%d'))
+                source = feed.feed.get('title', 'Health News')
+                
+                # Clean description (remove HTML tags)
+                description = re.sub(r'<[^>]+>', '', description)
+                description = description.strip()[:200] + '...' if len(description) > 200 else description
+                
+                all_articles.append({
+                    'title': title,
+                    'description': description,
+                    'content': description,  # Use description as content for RSS
+                    'url': link,
+                    'source': source,
+                    'date': published
+                })
+                
+        except Exception as e:
+            print(f"Error fetching RSS feed {feed_url}: {e}")
+            continue
+    
+    return all_articles
+
+def fetch_newsapi_news(language):
+    """Fetch news from NewsAPI if API key is available"""
+    if not NEWS_API_KEY:
+        return []
+    
+    try:
+        # Map language to country code for NewsAPI
+        country_map = {
+            'English': 'in',
+            'Hindi': 'in',
+            'Tamil': 'in',
+            'Telugu': 'in',
+            'Gujarati': 'in',
+            'Bengali': 'in',
+            'Marathi': 'in'
+        }
+        
+        country = country_map.get(language, 'in')
+        
+        # NewsAPI endpoint
+        url = f"https://newsapi.org/v2/top-headlines"
+        params = {
+            'apiKey': NEWS_API_KEY,
+            'country': country,
+            'category': 'health',
+            'pageSize': 10
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            articles = []
+            
+            for article in data.get('articles', [])[:5]:  # Get top 5 articles
+                articles.append({
+                    'title': article.get('title', 'No title'),
+                    'description': article.get('description', 'No description'),
+                    'content': article.get('content', article.get('description', 'No content')),
+                    'url': article.get('url', '#'),
+                    'source': article.get('source', {}).get('name', 'News Source'),
+                    'date': article.get('publishedAt', datetime.now().isoformat())
+                })
+            
+            return articles
+            
+    except Exception as e:
+        print(f"Error fetching NewsAPI: {e}")
+    
+    return []
+
+def format_realtime_news(articles, language):
+    """Format real-time news articles into the expected format"""
+    if not articles:
+        return ""
+    
+    formatted_news = []
+    
+    for i, article in enumerate(articles[:6], 1):  # Limit to 6 articles
+        formatted_article = f"""Title: {article['title']}
+Description: {article['description']}
+Content: {article['content']}
+URL: {article['url']}
+Source: {article['source']}
+Date: {article['date']}"""
+        
+        formatted_news.append(formatted_article)
+    
+    return "\n\n".join(formatted_news)
+
+def translate_news_if_needed(articles, target_language):
+    """Translate news to target language if needed using Gemini"""
+    if target_language == 'English' or not articles:
+        return articles
+    
+    try:
+        # Prepare articles for translation
+        articles_text = ""
+        for article in articles[:3]:  # Translate top 3 articles to save API calls
+            articles_text += f"Title: {article['title']}\nDescription: {article['description']}\n\n"
+        
+        # Translation prompt
+        translation_prompt = f"""Translate the following health news articles to {target_language}. 
+        Keep the same format and structure. Make sure medical terms are accurately translated.
+        
+        {articles_text}
+        
+        Provide the translation in the same format:
+        Title: [translated title]
+        Description: [translated description]
+        """
+        
+        response = gemini_model.generate_content(translation_prompt)
+        translated_text = response.text
+        
+        # Parse translated articles back
+        translated_articles = []
+        sections = translated_text.split('\n\n')
+        
+        for i, section in enumerate(sections):
+            if 'Title:' in section and i < len(articles):
+                lines = section.split('\n')
+                title_line = next((line for line in lines if line.startswith('Title:')), '')
+                desc_line = next((line for line in lines if line.startswith('Description:')), '')
+                
+                if title_line and desc_line:
+                    translated_articles.append({
+                        'title': title_line.replace('Title:', '').strip(),
+                        'description': desc_line.replace('Description:', '').strip(),
+                        'content': desc_line.replace('Description:', '').strip(),
+                        'url': articles[i]['url'],
+                        'source': articles[i]['source'],
+                        'date': articles[i]['date']
+                    })
+        
+        # Combine translated articles with remaining original articles
+        result = translated_articles + articles[len(translated_articles):]
+        return result
+        
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return articles  # Return original if translation fails
+
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
@@ -408,6 +615,123 @@ def get_news():
 
         return jsonify(result)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/news-realtime", methods=["POST"])
+def get_realtime_news():
+    """Get real-time news from RSS feeds and NewsAPI"""
+    try:
+        data = request.json
+        language = data.get("language", "English")
+        
+        # Check cache with shorter duration for real-time updates
+        cache_key = get_cache_key(language, "realtime_news")
+        if cache_key in cache:
+            item, timestamp = cache[cache_key]
+            if time.time() - timestamp < NEWS_CACHE_DURATION:  # 5 minutes cache
+                return jsonify(item)
+            else:
+                del cache[cache_key]
+        
+        print(f"Fetching real-time news for language: {language}")
+        
+        # Fetch from multiple sources
+        all_articles = []
+        
+        # Try RSS feeds first (free and reliable)
+        try:
+            rss_articles = fetch_rss_news(language)
+            all_articles.extend(rss_articles)
+            print(f"Fetched {len(rss_articles)} articles from RSS feeds")
+        except Exception as e:
+            print(f"RSS fetch error: {e}")
+        
+        # Try NewsAPI if available
+        try:
+            newsapi_articles = fetch_newsapi_news(language)
+            all_articles.extend(newsapi_articles)
+            print(f"Fetched {len(newsapi_articles)} articles from NewsAPI")
+        except Exception as e:
+            print(f"NewsAPI fetch error: {e}")
+        
+        # If we have articles, process them
+        if all_articles:
+            # Remove duplicates based on title similarity
+            unique_articles = []
+            seen_titles = set()
+            
+            for article in all_articles:
+                title_key = article['title'].lower().strip()[:50]  # First 50 chars for similarity
+                if title_key not in seen_titles:
+                    seen_titles.add(title_key)
+                    unique_articles.append(article)
+            
+            # Limit to 6 articles and sort by date (newest first)
+            unique_articles = unique_articles[:6]
+            
+            # Translate if needed (for non-English languages)
+            if language != 'English':
+                try:
+                    unique_articles = translate_news_if_needed(unique_articles, language)
+                except Exception as e:
+                    print(f"Translation error: {e}")
+            
+            # Format the news
+            formatted_news = format_realtime_news(unique_articles, language)
+            
+            result = {
+                "news": formatted_news,
+                "source": "realtime",
+                "articles_count": len(unique_articles),
+                "last_updated": datetime.now().isoformat()
+            }
+            
+            # Cache the result
+            cache[cache_key] = (result, time.time())
+            
+            return jsonify(result)
+        
+        else:
+            # Fallback to AI-generated news if no real-time sources available
+            print("No real-time articles found, falling back to AI generation")
+            
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            
+            fallback_prompt = f"""Generate 4 current healthcare news articles in {language} for India. Make them realistic and relevant to today's date.
+
+            Format EXACTLY:
+
+            Title: [Specific health news title]
+            Description: [One line summary]
+            Content: [2-3 sentences with key details]
+            URL: https://mohfw.gov.in/news/realtime-{1}
+            Source: Health News India
+            Date: {current_date}
+
+            Focus on current health topics like seasonal health, vaccination updates, health schemes, or medical breakthroughs."""
+            
+            fallback_response = gemini_model.generate_content(fallback_prompt)
+            fallback_news = fallback_response.text
+            
+            # Clean up formatting
+            cleaned_news = re.sub(r'\*\*|\*|#{1,6}\s*', '', fallback_news)
+            cleaned_news = re.sub(r'\n{3,}', '\n\n', cleaned_news)
+            cleaned_news = cleaned_news.strip()
+            
+            result = {
+                "news": cleaned_news,
+                "source": "ai_fallback",
+                "articles_count": 4,
+                "last_updated": datetime.now().isoformat()
+            }
+            
+            # Cache the fallback result
+            cache[cache_key] = (result, time.time())
+            
+            return jsonify(result)
+            
+    except Exception as e:
+        print(f"Error in get_realtime_news: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
