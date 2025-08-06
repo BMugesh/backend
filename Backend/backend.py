@@ -489,16 +489,67 @@ def ask():
         except:
             output_language = "en"  # Default to English if detection fails
 
-        # Optimized prompt for faster, focused healthcare responses
-        main_prompt = f"""You are ArogyaMitra, a healthcare AI. Provide a quick, focused response in {output_language}.
+        # Check for location-based queries
+        location_keywords = ['near me', 'nearby', 'close to me', 'in my area', 'around me', 'nearest']
+        hospital_keywords = ['hospital', 'clinic', 'doctor', 'medical center', 'health center']
+        appointment_keywords = ['book', 'appointment', 'schedule', 'visit', 'consultation']
+        
+        question_lower = question.lower()
+        
+        # Handle hospital location queries
+        if any(loc in question_lower for loc in location_keywords) and any(hosp in question_lower for hosp in hospital_keywords):
+            return jsonify({
+                "response": "I can help you find nearby healthcare facilities! To locate hospitals and clinics near you, I need your location. Please use our 'Find Doctors' feature or provide your city/area name.",
+                "summary": "Use location services to find nearby healthcare facilities",
+                "action": "find_hospitals",
+                "redirect": "/find-doctor"
+            })
+        
+        # Handle appointment booking queries  
+        if any(apt in question_lower for apt in appointment_keywords):
+            # Extract condition/symptoms from the query
+            condition = ""
+            if "fever" in question_lower:
+                condition = "fever"
+            elif "headache" in question_lower:
+                condition = "headache"
+            elif "cold" in question_lower or "cough" in question_lower:
+                condition = "cold/cough"
+            elif "stomach" in question_lower:
+                condition = "stomach pain"
+            elif "pain" in question_lower:
+                condition = "general pain"
+            else:
+                condition = "general consultation"
+                
+            return jsonify({
+                "response": f"I can help you book an appointment for {condition}! To schedule your appointment, please use our booking system where you can select a nearby hospital, preferred date/time, and provide your details.",
+                "summary": f"Book appointment for {condition} using our booking system",
+                "action": "book_appointment", 
+                "condition": condition,
+                "redirect": "/find-doctor"
+            })
+
+        # Enhanced prompt with location/appointment awareness
+        main_prompt = f"""You are ArogyaMitra, a healthcare AI assistant in India. Provide focused response in {output_language}.
 
         Health Query: {question}
 
-        Respond with:
+        For general health queries, respond with:
         1. ASSESSMENT: What this likely indicates (1-2 sentences)
-        2. IMMEDIATE ACTIONS: What to do now (3 bullet points)
+        2. IMMEDIATE ACTIONS: What to do now (3 bullet points)  
         3. MEDICAL CONSULTATION: When to see a doctor
         4. PREVENTION: Key preventive tip
+
+        For location/hospital queries ("near me", "nearby hospital"):
+        - Mention you can help find nearby healthcare facilities
+        - Ask for their location/city if not provided
+        - Suggest using the "Find Doctors" feature
+
+        For appointment queries ("book appointment", "schedule visit"):
+        - Confirm you can help with booking
+        - Ask about symptoms/condition if not mentioned
+        - Guide them to the booking system
 
         Keep concise but helpful. Include disclaimer about consulting healthcare providers."""
 
