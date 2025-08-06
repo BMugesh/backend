@@ -6,10 +6,13 @@ import time
 import hashlib
 import feedparser
 import json
+import base64
+import io
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import google.generativeai as genai
 from urllib.parse import quote
+from PIL import Image
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -458,7 +461,8 @@ def health_check():
             "/bookings",
             "/health-centers",
             "/news",
-            "/news-realtime"
+            "/news-realtime",
+            "/analyze-prescription"
         ]
     })
 
@@ -1148,6 +1152,162 @@ def get_realtime_news():
             
     except Exception as e:
         print(f"Error in get_realtime_news: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def process_prescription_image(image_data, filename):
+    """Process prescription image and extract text using Gemini Vision"""
+    try:
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Prepare the image for Gemini
+        return image
+        
+    except Exception as e:
+        print(f"Error processing image {filename}: {e}")
+        return None
+
+def analyze_prescription_with_gemini(images):
+    """Analyze prescription using Gemini 1.5-flash vision model"""
+    try:
+        # Create a comprehensive prescription analysis prompt
+        analysis_prompt = """You are an expert medical AI assistant specializing in prescription analysis. 
+        Analyze the uploaded prescription image(s) and extract the following information in a structured JSON format:
+
+        {
+            "medications": [
+                {
+                    "name": "medication name",
+                    "dosage": "dosage amount and unit",
+                    "frequency": "how often to take",
+                    "duration": "how long to take",
+                    "instructions": "specific instructions like before/after meals"
+                }
+            ],
+            "doctorName": "doctor's name",
+            "hospitalName": "hospital/clinic name",
+            "patientName": "patient name",
+            "date": "prescription date",
+            "diagnosis": "diagnosed condition/symptoms",
+            "precautions": ["list of precautions or warnings"],
+            "followUp": "follow-up instructions",
+            "additionalNotes": "any other important notes"
+        }
+
+        Please be very careful and accurate. If any information is not clearly visible or readable, 
+        indicate it as "Not specified" or "Not clearly visible". 
+
+        Focus on:
+        1. Medication names (generic and brand names)
+        2. Exact dosages (mg, ml, units, etc.)
+        3. Frequency (once daily, twice daily, etc.)
+        4. Duration (number of days, weeks, etc.)
+        5. Special instructions (before food, after food, etc.)
+        6. Doctor and hospital information
+        7. Patient information
+        8. Date of prescription
+        9. Any diagnoses mentioned
+        10. Important precautions or warnings
+
+        Provide only the JSON response without any additional text."""
+
+        # Use Gemini with vision capabilities
+        response = gemini_model.generate_content([analysis_prompt] + images)
+        
+        # Extract and clean the response
+        response_text = response.text.strip()
+        
+        # Try to extract JSON from the response
+        try:
+            # Remove any markdown formatting
+            json_text = re.sub(r'```json\s*|\s*```', '', response_text)
+            json_text = json_text.strip()
+            
+            # Parse JSON
+            analysis_data = json.loads(json_text)
+            return analysis_data
+            
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract information manually
+            return {
+                "medications": [],
+                "doctorName": "Not clearly visible",
+                "hospitalName": "Not clearly visible", 
+                "patientName": "Not clearly visible",
+                "date": "Not clearly visible",
+                "diagnosis": "Could not extract from prescription",
+                "precautions": ["Please consult with your doctor for proper medication guidance"],
+                "followUp": "As advised by your doctor",
+                "additionalNotes": "AI analysis may not be 100% accurate. Please verify with your healthcare provider."
+            }
+            
+    except Exception as e:
+        print(f"Error in Gemini analysis: {e}")
+        return {
+            "medications": [],
+            "doctorName": "Analysis failed",
+            "hospitalName": "Analysis failed",
+            "patientName": "Analysis failed", 
+            "date": "Analysis failed",
+            "diagnosis": "Could not analyze prescription",
+            "precautions": ["Please consult with your doctor"],
+            "followUp": "As advised by your doctor",
+            "additionalNotes": f"Analysis error: {str(e)}"
+        }
+
+@app.route("/analyze-prescription", methods=["POST"])
+def analyze_prescription():
+    """Analyze prescription images using Gemini 1.5-flash"""
+    try:
+        data = request.json
+        files = data.get("files", [])
+        user_id = data.get("userId", "anonymous")
+        
+        if not files:
+            return jsonify({"error": "No files provided"}), 400
+        
+        # Process each uploaded file
+        processed_images = []
+        
+        for file_info in files:
+            filename = file_info.get("name", "")
+            file_type = file_info.get("type", "")
+            file_data = file_info.get("data", "")
+            
+            # Only process image files for now
+            if file_type.startswith('image/'):
+                processed_image = process_prescription_image(file_data, filename)
+                if processed_image:
+                    processed_images.append(processed_image)
+            else:
+                # For PDFs, we would need additional processing
+                print(f"PDF processing not implemented yet for {filename}")
+        
+        if not processed_images:
+            return jsonify({"error": "No valid images found for analysis"}), 400
+        
+        # Analyze prescriptions with Gemini
+        analysis = analyze_prescription_with_gemini(processed_images)
+        
+        # Add metadata
+        analysis_result = {
+            "analysis": analysis,
+            "processed_files": len(processed_images),
+            "analysis_timestamp": datetime.now().isoformat(),
+            "user_id": user_id,
+            "ai_model": "gemini-1.5-flash",
+            "confidence_note": "AI analysis should be verified with healthcare professionals"
+        }
+        
+        return jsonify(analysis_result)
+        
+    except Exception as e:
+        print(f"Error in analyze_prescription: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
