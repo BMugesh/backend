@@ -454,6 +454,7 @@ def health_check():
         "endpoints": [
             "/ask",
             "/doctors", 
+            "/hospitals",
             "/health-centers",
             "/news",
             "/news-realtime"
@@ -550,6 +551,285 @@ def find_doctors():
         doctors_formatted = format_text(doctors_text)
         
         return jsonify({"doctors": doctors_formatted})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Hospital Data with comprehensive information
+HOSPITAL_DATABASE = [
+    {
+        "id": 1,
+        "name": "All India Institute of Medical Sciences (AIIMS)",
+        "type": "Government Hospital",
+        "specialties": ["Cardiology", "Neurology", "Oncology", "General Surgery", "Orthopedics", "Emergency Medicine"],
+        "rating": 4.8,
+        "phone": "+91-11-2658-8500",
+        "availability": "24/7",
+        "location": "New Delhi",
+        "state": "Delhi",
+        "description": "Premier medical institute with advanced healthcare facilities",
+        "beds": 2478,
+        "established": 1956
+    },
+    {
+        "id": 2,
+        "name": "Apollo Hospitals",
+        "type": "Private Hospital",
+        "specialties": ["Cardiology", "Cardiac Surgery", "Neurology", "Oncology", "Transplant Surgery"],
+        "rating": 4.6,
+        "phone": "+91-44-2829-3333",
+        "availability": "24/7",
+        "location": "Chennai",
+        "state": "Tamil Nadu",
+        "description": "Leading private healthcare provider with advanced medical technology",
+        "beds": 550,
+        "established": 1983
+    },
+    {
+        "id": 3,
+        "name": "Fortis Hospital",
+        "type": "Private Hospital",
+        "specialties": ["Cardiology", "Neurosurgery", "Orthopedics", "Gastroenterology", "Emergency Medicine"],
+        "rating": 4.4,
+        "phone": "+91-124-496-2200",
+        "availability": "24/7",
+        "location": "Gurgaon",
+        "state": "Haryana",
+        "description": "Multi-specialty hospital with cutting-edge medical facilities",
+        "beds": 355,
+        "established": 2001
+    },
+    {
+        "id": 4,
+        "name": "Manipal Hospital",
+        "type": "Private Hospital",
+        "specialties": ["Cardiology", "Neurology", "Oncology", "Nephrology", "Orthopedics"],
+        "rating": 4.5,
+        "phone": "+91-80-2502-4444",
+        "availability": "24/7",
+        "location": "Bangalore",
+        "state": "Karnataka",
+        "description": "Comprehensive healthcare with specialized treatment centers",
+        "beds": 650,
+        "established": 1991
+    },
+    {
+        "id": 5,
+        "name": "King George's Medical University",
+        "type": "Government Hospital",
+        "specialties": ["General Medicine", "Surgery", "Pediatrics", "Obstetrics", "Emergency Medicine"],
+        "rating": 4.2,
+        "phone": "+91-522-2257-450",
+        "availability": "24/7",
+        "location": "Lucknow",
+        "state": "Uttar Pradesh",
+        "description": "Leading medical university hospital with teaching facilities",
+        "beds": 1840,
+        "established": 1911
+    },
+    {
+        "id": 6,
+        "name": "Christian Medical College",
+        "type": "Private Hospital",
+        "specialties": ["Internal Medicine", "Surgery", "Pediatrics", "Obstetrics", "Emergency Medicine"],
+        "rating": 4.7,
+        "phone": "+91-416-228-4000",
+        "availability": "24/7",
+        "location": "Vellore",
+        "state": "Tamil Nadu",
+        "description": "Renowned medical college hospital with excellent patient care",
+        "beds": 2718,
+        "established": 1900
+    },
+    {
+        "id": 7,
+        "name": "Max Super Specialty Hospital",
+        "type": "Private Hospital",
+        "specialties": ["Cardiology", "Oncology", "Neurosurgery", "Orthopedics", "Gastroenterology"],
+        "rating": 4.3,
+        "phone": "+91-11-2651-5050",
+        "availability": "24/7",
+        "location": "Delhi",
+        "state": "Delhi",
+        "description": "Advanced super specialty hospital with international standards",
+        "beds": 315,
+        "established": 2006
+    },
+    {
+        "id": 8,
+        "name": "Tata Memorial Hospital",
+        "type": "Government Hospital",
+        "specialties": ["Oncology", "Radiation Oncology", "Surgical Oncology", "Medical Oncology"],
+        "rating": 4.6,
+        "phone": "+91-22-2417-7000",
+        "availability": "24/7",
+        "location": "Mumbai",
+        "state": "Maharashtra",
+        "description": "Premier cancer treatment and research center",
+        "beds": 629,
+        "established": 1941
+    },
+    {
+        "id": 9,
+        "name": "Sankara Nethralaya",
+        "type": "Private Hospital",
+        "specialties": ["Ophthalmology", "Retina Surgery", "Corneal Transplant", "Pediatric Ophthalmology"],
+        "rating": 4.5,
+        "phone": "+91-44-2827-1616",
+        "availability": "6 AM - 10 PM",
+        "location": "Chennai",
+        "state": "Tamil Nadu",
+        "description": "Leading eye care hospital with specialized treatments",
+        "beds": 100,
+        "established": 1978
+    },
+    {
+        "id": 10,
+        "name": "Medanta - The Medicity",
+        "type": "Private Hospital",
+        "specialties": ["Cardiology", "Neurosurgery", "Oncology", "Gastroenterology", "Orthopedics"],
+        "rating": 4.4,
+        "phone": "+91-124-414-1414",
+        "availability": "24/7",
+        "location": "Gurgaon",
+        "state": "Haryana",
+        "description": "Multi-super specialty hospital with advanced medical technology",
+        "beds": 1250,
+        "established": 2009
+    }
+]
+
+# Condition to specialty mapping for better hospital matching
+CONDITION_SPECIALTY_MAP = {
+    "heart": ["Cardiology", "Cardiac Surgery", "Interventional Cardiology"],
+    "brain": ["Neurology", "Neurosurgery", "Neuropsychiatry"],
+    "cancer": ["Oncology", "Radiation Oncology", "Surgical Oncology", "Medical Oncology"],
+    "bone": ["Orthopedics", "Rheumatology", "Sports Medicine"],
+    "kidney": ["Nephrology", "Urology", "Renal Transplant"],
+    "liver": ["Hepatology", "Gastroenterology", "Liver Transplant"],
+    "lung": ["Pulmonology", "Thoracic Surgery", "Respiratory Medicine"],
+    "stomach": ["Gastroenterology", "General Surgery", "Digestive Diseases"],
+    "skin": ["Dermatology", "Plastic Surgery", "Dermatopathology"],
+    "eye": ["Ophthalmology", "Retina Surgery", "Corneal Transplant"],
+    "child": ["Pediatrics", "Pediatric Surgery", "Neonatology"],
+    "pregnancy": ["Obstetrics", "Gynecology", "Maternal Medicine"],
+    "mental": ["Psychiatry", "Psychology", "Mental Health"],
+    "emergency": ["Emergency Medicine", "Trauma Surgery", "Critical Care"]
+}
+
+def find_hospitals_by_condition_location(condition, location, specialty=None):
+    """Find hospitals based on condition, location and specialty"""
+    
+    # Get relevant specialties for the condition
+    condition_lower = condition.lower()
+    relevant_specialties = []
+    
+    for keyword, specialties in CONDITION_SPECIALTY_MAP.items():
+        if keyword in condition_lower:
+            relevant_specialties.extend(specialties)
+    
+    # If specialty is specifically mentioned, use it
+    if specialty:
+        relevant_specialties.append(specialty)
+    
+    # Filter hospitals
+    matching_hospitals = []
+    location_lower = location.lower()
+    
+    for hospital in HOSPITAL_DATABASE:
+        # Check location match (city or state)
+        location_match = (
+            location_lower in hospital["location"].lower() or
+            location_lower in hospital["state"].lower() or
+            hospital["location"].lower() in location_lower or
+            hospital["state"].lower() in location_lower
+        )
+        
+        # Check specialty match
+        specialty_match = False
+        if relevant_specialties:
+            specialty_match = any(
+                any(spec.lower() in hospital_spec.lower() for hospital_spec in hospital["specialties"])
+                for spec in relevant_specialties
+            )
+        else:
+            specialty_match = True  # If no specific specialty needed, match all
+        
+        if location_match or specialty_match:
+            # Calculate relevance score
+            score = 0
+            if location_match:
+                score += 50
+            if specialty_match:
+                score += 30
+            score += hospital["rating"] * 5  # Rating bonus
+            
+            hospital_info = hospital.copy()
+            hospital_info["relevance_score"] = score
+            hospital_info["address"] = f"{hospital['location']}, {hospital['state']}"
+            hospital_info["distance"] = f"{round(score/10, 1)} km"  # Mock distance based on relevance
+            
+            matching_hospitals.append(hospital_info)
+    
+    # Sort by relevance score
+    matching_hospitals.sort(key=lambda x: x["relevance_score"], reverse=True)
+    
+    # Add suggested specialty info
+    suggested_specialty = relevant_specialties[0] if relevant_specialties else None
+    
+    return {
+        "hospitals": matching_hospitals[:6],  # Return top 6 results
+        "suggestedSpecialty": suggested_specialty,
+        "totalFound": len(matching_hospitals)
+    }
+
+@app.route("/hospitals", methods=["POST"])
+def find_hospitals():
+    """Find hospitals based on condition, location and specialty"""
+    try:
+        data = request.json
+        condition = data.get("condition", "").strip()
+        location = data.get("location", "").strip()
+        specialty = data.get("specialty", "").strip()
+        
+        if not location:
+            return jsonify({"error": "Location is required"}), 400
+        
+        # Check cache first
+        cache_key = get_cache_key(f"{condition}_{location}_{specialty}", "hospitals")
+        cached_result = get_from_cache(cache_key)
+        if cached_result:
+            return jsonify(cached_result)
+        
+        # Find hospitals
+        result = find_hospitals_by_condition_location(condition, location, specialty)
+        
+        if not result["hospitals"]:
+            # Fallback: return some hospitals for the location
+            fallback_hospitals = []
+            location_lower = location.lower()
+            
+            for hospital in HOSPITAL_DATABASE:
+                if (location_lower in hospital["location"].lower() or 
+                    location_lower in hospital["state"].lower()):
+                    hospital_info = hospital.copy()
+                    hospital_info["address"] = f"{hospital['location']}, {hospital['state']}"
+                    hospital_info["distance"] = f"{round(hospital['rating'] * 2, 1)} km"
+                    fallback_hospitals.append(hospital_info)
+            
+            if fallback_hospitals:
+                result = {
+                    "hospitals": fallback_hospitals[:3],
+                    "suggestedSpecialty": None,
+                    "totalFound": len(fallback_hospitals)
+                }
+            else:
+                return jsonify({"error": "No hospitals found in the specified location"}), 404
+        
+        # Cache the result
+        set_cache(cache_key, result)
+        
+        return jsonify(result)
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
