@@ -1,7 +1,61 @@
-Flask==3.0.0
-Flask-CORS==4.0.0
-python-dotenv==1.0.0
+# =============================================================================
+# ArogyaMitra Backend Requirements
+# Health AI Assistant Backend Dependencies
+# =============================================================================
+
+# Core Web Framework
+Flask==3.0.3
+Flask-CORS==4.0.1
+Werkzeug==3.0.1
+
+# Environment & Configuration
+python-dotenv==1.0.1
+
+# AI & Machine Learning
 google-generativeai==0.8.3
-requests==2.31.0
 langdetect==1.0.9
+
+# HTTP & API
+requests==2.32.3
+urllib3==2.2.2
+
+# Data Processing & Parsing
 feedparser==6.0.11
+
+# Security & Validation
+certifi==2024.2.2
+cryptography>=42.0.0
+
+# Database (Optional - for future data persistence)
+# SQLAlchemy==2.0.25
+# Flask-SQLAlchemy==3.1.1
+# psycopg2-binary==2.9.9  # For PostgreSQL
+# redis==5.0.1  # For caching
+
+# Monitoring & Logging
+Flask-Limiter==3.5.0  # Rate limiting
+Werkzeug>=3.0.1  # Security patches
+
+# Development & Testing (Optional)
+# pytest==8.0.0
+# pytest-flask==1.3.0
+# coverage==7.4.0
+# black==24.1.1  # Code formatting
+# flake8==7.0.0  # Linting
+
+# Production & Deployment
+gunicorn==21.2.0  # WSGI server for production
+gevent==23.9.1  # Async support
+
+# Health & Utilities
+Pillow>=10.2.0  # Image processing (if needed)
+dateutils>=0.6.12  # Date utilities
+regex>=2023.12.25  # Enhanced regex support
+
+# API Documentation (Optional)
+# Flask-RESTful==0.3.10
+# flasgger==0.9.7.1  # Swagger documentation
+
+# Caching & Performance
+cachetools==5.3.2
+six>=1.16.0

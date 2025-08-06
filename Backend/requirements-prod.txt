@@ -1,0 +1,56 @@
+# =============================================================================
+# ArogyaMitra Backend - Production Requirements
+# Optimized for production deployment with enhanced security and performance
+# =============================================================================
+
+# Install base requirements first
+-r requirements.txt
+
+# Production WSGI Server
+gunicorn==21.2.0
+gevent==23.9.1
+
+# Enhanced Security
+Flask-Talisman==1.1.0      # Security headers
+Flask-Limiter==3.5.0       # Rate limiting (already in base)
+cryptography>=42.0.0       # Encryption (already in base)
+
+# Monitoring & Logging
+sentry-sdk[flask]==1.40.0  # Error tracking
+structlog==23.2.0          # Structured logging
+python-json-logger==2.0.7  # JSON logging
+
+# Performance & Caching
+redis==5.0.1               # Redis caching
+Flask-Caching==2.1.0       # Flask caching extension
+hiredis==2.3.2             # Fast Redis client
+
+# Database Production
+psycopg2-binary==2.9.9     # PostgreSQL adapter
+SQLAlchemy==2.0.25         # ORM
+Flask-SQLAlchemy==3.1.1    # Flask integration
+
+# Health Checks & Metrics
+Flask-HealthCheck==1.0.2   # Health check endpoints
+prometheus-client==0.19.0  # Metrics collection
+
+# Email & Notifications (if needed)
+Flask-Mail==0.9.1          # Email sending
+celery==5.3.4              # Task queue
+kombu==5.3.4               # Celery message transport
+
+# API Rate Limiting & Throttling
+slowapi==0.1.9             # Advanced rate limiting
+limits==3.7.0              # Rate limiting utilities
+
+# Configuration Management
+pydantic==2.5.3            # Data validation
+pydantic-settings==2.1.0   # Settings management
+
+# HTTP & Networking
+httpx==0.26.0              # Async HTTP client
+aiofiles==23.2.1           # Async file operations
+
+# Environment & Deployment
+python-dotenv==1.0.1       # Environment variables (already in base)
+whitenoise==6.6.0          # Static file serving
