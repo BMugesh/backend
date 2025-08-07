@@ -148,94 +148,187 @@ def clean_and_format_response(raw_response):
     formatted_summary = re.sub(r"\n{3,}", "\n\n", summary_part)
     return f"{formatted_articles}\n\n{'-'*100}\n\n{formatted_summary}"
 
-def get_nearest_health_centers(latitude, longitude):
-    lat_offset = 0.09  
-    lon_offset = 0.09  
+def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results=20):
+    """Enhanced function to get nearest health centers with better accuracy"""
     import math
-    lon_offset = 0.09 / math.cos(math.radians(latitude))
+    import time
     
-    # Define bounding box
-    south = latitude - lat_offset
-    north = latitude + lat_offset
-    west = longitude - lon_offset
-    east = longitude + lon_offset
-
-    search_queries = [
-       
-        f"https://nominatim.openstreetmap.org/search?format=json&amenity=hospital&bounded=1&viewbox={west},{north},{east},{south}&limit=10",
-        
-        f"https://nominatim.openstreetmap.org/search?format=json&amenity=clinic&bounded=1&viewbox={west},{north},{east},{south}&limit=10",
-       
-        f"https://nominatim.openstreetmap.org/search?format=json&amenity=doctors&bounded=1&viewbox={west},{north},{east},{south}&limit=10",
-        
-        f"https://nominatim.openstreetmap.org/search?format=json&healthcare=*&bounded=1&viewbox={west},{north},{east},{south}&limit=10",
-    ]
+    # Dynamic search radius based on location type (urban vs rural)
+    # Start with smaller radius for urban areas, expand if needed
+    search_radii = [0.05, 0.1, 0.2, 0.3] if max_distance <= 10 else [0.1, 0.2, 0.4, 0.6]
     
-    headers = {'User-Agent': 'GramAroghya-HealthApp/1.0'}
+    headers = {'User-Agent': 'ArogyaCare-HealthApp/2.0 (Enhanced Geolocation)'}
     all_results = []
     
-    for search_url in search_queries:
-        try:
-            response = requests.get(search_url, headers=headers)
-            if response.status_code == 200:
-                data = response.json()
-                all_results.extend(data)
-                # Add small delay to be respectful to the API
-                import time
-                time.sleep(0.1)
-        except Exception as e:
-            print(f"Search failed for {search_url}: {e}")
-            continue
-    
-    if not all_results:
+    for radius in search_radii:
+        if len(all_results) >= max_results:
+            break
+            
+        # Calculate precise bounding box with latitude correction
+        lat_offset = radius
+        lon_offset = radius / math.cos(math.radians(latitude))
+        
+        south = latitude - lat_offset
+        north = latitude + lat_offset
+        west = longitude - lon_offset
+        east = longitude + lon_offset
 
+        # Enhanced search queries with better categorization
+        search_queries = [
+            # Hospitals (highest priority)
+            f"https://nominatim.openstreetmap.org/search?format=json&amenity=hospital&bounded=1&viewbox={west},{north},{east},{south}&limit=15&extratags=1&addressdetails=1",
+            
+            # Medical centers and clinics
+            f"https://nominatim.openstreetmap.org/search?format=json&amenity=clinic&bounded=1&viewbox={west},{north},{east},{south}&limit=15&extratags=1&addressdetails=1",
+            
+            # Doctors' offices
+            f"https://nominatim.openstreetmap.org/search?format=json&amenity=doctors&bounded=1&viewbox={west},{north},{east},{south}&limit=10&extratags=1&addressdetails=1",
+            
+            # General healthcare facilities
+            f"https://nominatim.openstreetmap.org/search?format=json&healthcare=*&bounded=1&viewbox={west},{north},{east},{south}&limit=15&extratags=1&addressdetails=1",
+            
+            # Emergency services
+            f"https://nominatim.openstreetmap.org/search?format=json&emergency=*&bounded=1&viewbox={west},{north},{east},{south}&limit=5&extratags=1&addressdetails=1",
+            
+            # Pharmacies (lower priority but useful)
+            f"https://nominatim.openstreetmap.org/search?format=json&amenity=pharmacy&bounded=1&viewbox={west},{north},{east},{south}&limit=8&extratags=1&addressdetails=1",
+        ]
+        
+        for search_url in search_queries:
+            try:
+                response = requests.get(search_url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    all_results.extend(data)
+                    time.sleep(0.15)  # Respectful API usage
+                elif response.status_code == 429:  # Rate limited
+                    time.sleep(1)
+                    continue
+            except Exception as e:
+                print(f"Search failed for radius {radius}: {e}")
+                continue
+        
+        # Break early if we have sufficient results in close proximity
+        if len(all_results) >= 5 and radius <= 0.1:
+            break
+
+    # Fallback: Search in wider area if no results found
+    if not all_results:
         try:
-            reverse_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={latitude}&lon={longitude}&zoom=10"
-            reverse_response = requests.get(reverse_url, headers=headers)
+            # Get location context for better fallback
+            reverse_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={latitude}&lon={longitude}&zoom=12&addressdetails=1"
+            reverse_response = requests.get(reverse_url, headers=headers, timeout=10)
             if reverse_response.status_code == 200:
                 reverse_data = reverse_response.json()
-                country = reverse_data.get("address", {}).get("country", "")
-                if country:
-                    # Search within the country
-                    country_search_url = f"https://nominatim.openstreetmap.org/search?format=json&amenity=hospital&countrycodes={get_country_code(country)}&limit=10"
-                    country_response = requests.get(country_search_url, headers=headers)
-                    if country_response.status_code == 200:
-                        all_results = country_response.json()
+                address = reverse_data.get("address", {})
+                
+                # Try searching by city/town name
+                city = address.get("city") or address.get("town") or address.get("village") or address.get("hamlet")
+                state = address.get("state")
+                country = address.get("country")
+                
+                if city:
+                    fallback_search = f"https://nominatim.openstreetmap.org/search?format=json&q=hospital+{city}&limit=10&extratags=1&addressdetails=1"
+                    fallback_response = requests.get(fallback_search, headers=headers, timeout=10)
+                    if fallback_response.status_code == 200:
+                        all_results.extend(fallback_response.json())
+                        
+                if state and not all_results:
+                    state_search = f"https://nominatim.openstreetmap.org/search?format=json&q=hospital+{state}&limit=10&extratags=1&addressdetails=1"
+                    state_response = requests.get(state_search, headers=headers, timeout=10)
+                    if state_response.status_code == 200:
+                        all_results.extend(state_response.json())
+                        
         except Exception as e:
-            print(f"Country search failed: {e}")
+            print(f"Fallback search failed: {e}")
     
     if not all_results:
-        return {"error": "No health centers found nearby"}
+        return {"error": "No health centers found nearby. Please try expanding your search radius."}
     
-    
+    # Enhanced result processing with better deduplication
     seen_locations = set()
     results = []
     
     for place in all_results:
-        location_key = (float(place["lat"]), float(place["lon"]))
-        if location_key not in seen_locations:
+        try:
+            place_lat = float(place["lat"])
+            place_lon = float(place["lon"])
+            
+            # More precise deduplication (within 50 meters)
+            location_key = (round(place_lat, 4), round(place_lon, 4))
+            if location_key in seen_locations:
+                continue
             seen_locations.add(location_key)
             
+            # Calculate precise distance
+            distance = calculate_distance(latitude, longitude, place_lat, place_lon)
             
-            distance = calculate_distance(latitude, longitude, float(place["lat"]), float(place["lon"]))
-            
-            
-            if distance <= 50:
-                name = place.get("display_name", "Unknown Health Center")
+            # Filter by maximum distance
+            if distance <= max_distance:
+                # Enhanced facility information extraction
+                display_name = place.get("display_name", "")
+                address_parts = display_name.split(",")
+                facility_name = address_parts[0].strip()
                 
-                facility_name = name.split(",")[0].strip()
+                # Extract facility type from tags or name
+                place_type = place.get("type", "")
+                amenity = place.get("amenity", "")
+                healthcare = place.get("healthcare", "")
+                
+                # Determine facility category
+                facility_type = "medical"
+                if amenity == "hospital" or "hospital" in facility_name.lower():
+                    facility_type = "hospital"
+                elif amenity == "clinic" or "clinic" in facility_name.lower():
+                    facility_type = "clinic"
+                elif amenity == "doctors" or "doctor" in facility_name.lower():
+                    facility_type = "doctor"
+                elif amenity == "pharmacy" or "pharmacy" in facility_name.lower():
+                    facility_type = "pharmacy"
+                elif "emergency" in place_type.lower() or "emergency" in facility_name.lower():
+                    facility_type = "emergency"
+                
+                # Extract contact information if available
+                extratags = place.get("extratags", {})
+                phone = extratags.get("phone", "")
+                website = extratags.get("website", "")
+                opening_hours = extratags.get("opening_hours", "")
+                
+                # Get full address with proper formatting
+                address_data = place.get("address", {})
+                if address_data:
+                    formatted_address = ", ".join(filter(None, [
+                        address_data.get("house_number", ""),
+                        address_data.get("road", ""),
+                        address_data.get("suburb", ""),
+                        address_data.get("city", address_data.get("town", "")),
+                        address_data.get("state", ""),
+                        address_data.get("postcode", "")
+                    ]))
+                else:
+                    formatted_address = display_name
                 
                 results.append({
                     "name": facility_name,
-                    "address": place.get("display_name", "No address available"),
-                    "latitude": float(place["lat"]),
-                    "longitude": float(place["lon"]),
-                    "distance": distance
+                    "address": formatted_address,
+                    "latitude": place_lat,
+                    "longitude": place_lon,
+                    "distance": round(distance, 2),
+                    "type": facility_type,
+                    "phone": phone,
+                    "website": website,
+                    "opening_hours": opening_hours,
+                    "osm_id": place.get("osm_id", ""),
+                    "place_id": place.get("place_id", "")
                 })
+                
+        except (ValueError, KeyError) as e:
+            print(f"Error processing place data: {e}")
+            continue
     
-    
+    # Sort by distance (nearest first) and limit results
     results.sort(key=lambda x: x.get("distance", float('inf')))
-    return results[:10]
+    return results[:max_results]
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
@@ -624,7 +717,9 @@ HOSPITAL_DATABASE = [
         "state": "Delhi",
         "description": "Premier medical institute with advanced healthcare facilities",
         "beds": 2478,
-        "established": 1956
+        "established": 1956,
+        "latitude": 28.5665,
+        "longitude": 77.2071
     },
     {
         "id": 2,
@@ -638,7 +733,9 @@ HOSPITAL_DATABASE = [
         "state": "Tamil Nadu",
         "description": "Leading private healthcare provider with advanced medical technology",
         "beds": 550,
-        "established": 1983
+        "established": 1983,
+        "latitude": 13.0827,
+        "longitude": 80.2707
     },
     {
         "id": 3,
@@ -652,7 +749,9 @@ HOSPITAL_DATABASE = [
         "state": "Haryana",
         "description": "Multi-specialty hospital with cutting-edge medical facilities",
         "beds": 355,
-        "established": 2001
+        "established": 2001,
+        "latitude": 28.4595,
+        "longitude": 77.0266
     },
     {
         "id": 4,
@@ -666,7 +765,9 @@ HOSPITAL_DATABASE = [
         "state": "Karnataka",
         "description": "Comprehensive healthcare with specialized treatment centers",
         "beds": 650,
-        "established": 1991
+        "established": 1991,
+        "latitude": 12.9716,
+        "longitude": 77.5946
     },
     {
         "id": 5,
@@ -680,7 +781,9 @@ HOSPITAL_DATABASE = [
         "state": "Uttar Pradesh",
         "description": "Leading medical university hospital with teaching facilities",
         "beds": 1840,
-        "established": 1911
+        "established": 1911,
+        "latitude": 26.8467,
+        "longitude": 80.9462
     },
     {
         "id": 6,
@@ -694,7 +797,9 @@ HOSPITAL_DATABASE = [
         "state": "Tamil Nadu",
         "description": "Renowned medical college hospital with excellent patient care",
         "beds": 2718,
-        "established": 1900
+        "established": 1900,
+        "latitude": 12.9165,
+        "longitude": 79.1325
     },
     {
         "id": 7,
@@ -772,8 +877,8 @@ CONDITION_SPECIALTY_MAP = {
     "emergency": ["Emergency Medicine", "Trauma Surgery", "Critical Care"]
 }
 
-def find_hospitals_by_condition_location(condition, location, specialty=None):
-    """Find hospitals based on condition, location and specialty"""
+def find_hospitals_by_condition_location(condition, location, specialty=None, user_lat=None, user_lng=None):
+    """Enhanced hospital finding with geolocation and better matching"""
     
     # Get relevant specialties for the condition
     condition_lower = condition.lower()
@@ -822,45 +927,74 @@ def find_hospitals_by_condition_location(condition, location, specialty=None):
             hospital_info = hospital.copy()
             hospital_info["relevance_score"] = score
             hospital_info["address"] = f"{hospital['location']}, {hospital['state']}"
-            hospital_info["distance"] = f"{round(score/10, 1)} km"  # Mock distance based on relevance
             
+            # Enhanced distance calculation if user coordinates provided
+            if user_lat and user_lng and "latitude" in hospital and "longitude" in hospital:
+                actual_distance = calculate_distance(user_lat, user_lng, hospital["latitude"], hospital["longitude"])
+                hospital_info["distance"] = f"{round(actual_distance, 1)} km"
+                hospital_info["actual_distance"] = actual_distance
+                # Boost score for closer hospitals
+                if actual_distance <= 5:
+                    score += 20
+                elif actual_distance <= 10:
+                    score += 15
+                elif actual_distance <= 20:
+                    score += 10
+            else:
+                # Fallback to mock distance based on relevance
+                hospital_info["distance"] = f"{round(score/10, 1)} km"
+                hospital_info["actual_distance"] = score/10
+                
+            hospital_info["relevance_score"] = score
             matching_hospitals.append(hospital_info)
     
-    # Sort by relevance score
-    matching_hospitals.sort(key=lambda x: x["relevance_score"], reverse=True)
+    # Sort by actual distance if available, otherwise by relevance score
+    if user_lat and user_lng:
+        matching_hospitals.sort(key=lambda x: x.get("actual_distance", float('inf')))
+    else:
+        matching_hospitals.sort(key=lambda x: x["relevance_score"], reverse=True)
     
     # Add suggested specialty info
     suggested_specialty = relevant_specialties[0] if relevant_specialties else None
     
     return {
-        "hospitals": matching_hospitals[:6],  # Return top 6 results
+        "hospitals": matching_hospitals[:8],  # Return top 8 results
         "suggestedSpecialty": suggested_specialty,
-        "totalFound": len(matching_hospitals)
+        "totalFound": len(matching_hospitals),
+        "searchLocation": location,
+        "userCoordinates": {"latitude": user_lat, "longitude": user_lng} if user_lat and user_lng else None
     }
 
 @app.route("/hospitals", methods=["POST"])
 def find_hospitals():
-    """Find hospitals based on condition, location and specialty"""
+    """Enhanced hospital finding with geolocation support"""
     try:
         data = request.json
         condition = data.get("condition", "").strip()
         location = data.get("location", "").strip()
         specialty = data.get("specialty", "").strip()
+        user_lat = data.get("latitude")  # Optional user coordinates
+        user_lng = data.get("longitude")
         
         if not location:
             return jsonify({"error": "Location is required"}), 400
         
-        # Check cache first
-        cache_key = get_cache_key(f"{condition}_{location}_{specialty}", "hospitals")
+        # Validate coordinates if provided
+        if user_lat is not None and user_lng is not None:
+            if not (-90 <= user_lat <= 90) or not (-180 <= user_lng <= 180):
+                return jsonify({"error": "Invalid coordinates provided"}), 400
+        
+        # Check cache first (include coordinates in cache key if provided)
+        cache_key = get_cache_key(f"{condition}_{location}_{specialty}_{user_lat}_{user_lng}", "hospitals")
         cached_result = get_from_cache(cache_key)
         if cached_result:
             return jsonify(cached_result)
         
-        # Find hospitals
-        result = find_hospitals_by_condition_location(condition, location, specialty)
+        # Find hospitals with enhanced geolocation
+        result = find_hospitals_by_condition_location(condition, location, specialty, user_lat, user_lng)
         
         if not result["hospitals"]:
-            # Fallback: return some hospitals for the location
+            # Enhanced fallback with geolocation
             fallback_hospitals = []
             location_lower = location.lower()
             
@@ -869,17 +1003,67 @@ def find_hospitals():
                     location_lower in hospital["state"].lower()):
                     hospital_info = hospital.copy()
                     hospital_info["address"] = f"{hospital['location']}, {hospital['state']}"
-                    hospital_info["distance"] = f"{round(hospital['rating'] * 2, 1)} km"
+                    
+                    # Calculate actual distance if coordinates provided
+                    if user_lat and user_lng and "latitude" in hospital and "longitude" in hospital:
+                        actual_distance = calculate_distance(user_lat, user_lng, hospital["latitude"], hospital["longitude"])
+                        hospital_info["distance"] = f"{round(actual_distance, 1)} km"
+                        hospital_info["actual_distance"] = actual_distance
+                    else:
+                        hospital_info["distance"] = f"{round(hospital['rating'] * 2, 1)} km"
+                        hospital_info["actual_distance"] = hospital['rating'] * 2
+                        
                     fallback_hospitals.append(hospital_info)
             
             if fallback_hospitals:
+                # Sort fallback results by distance if coordinates available
+                if user_lat and user_lng:
+                    fallback_hospitals.sort(key=lambda x: x.get("actual_distance", float('inf')))
+                
                 result = {
-                    "hospitals": fallback_hospitals[:3],
+                    "hospitals": fallback_hospitals[:5],
                     "suggestedSpecialty": None,
-                    "totalFound": len(fallback_hospitals)
+                    "totalFound": len(fallback_hospitals),
+                    "searchLocation": location,
+                    "userCoordinates": {"latitude": user_lat, "longitude": user_lng} if user_lat and user_lng else None,
+                    "fallback": True
                 }
             else:
-                return jsonify({"error": "No hospitals found in the specified location"}), 404
+                # Try to get nearby hospitals using coordinates
+                if user_lat and user_lng:
+                    nearby_centers = get_nearest_health_centers(user_lat, user_lng, 50, 10)
+                    if isinstance(nearby_centers, list) and nearby_centers:
+                        # Convert health centers to hospital format
+                        converted_hospitals = []
+                        for center in nearby_centers:
+                            if center.get("type") in ["hospital", "clinic", "medical"]:
+                                converted_hospitals.append({
+                                    "name": center["name"],
+                                    "address": center["address"],
+                                    "distance": f"{center['distance']} km",
+                                    "phone": center.get("phone", ""),
+                                    "type": center["type"].title(),
+                                    "rating": 4.0,  # Default rating
+                                    "specialties": ["General Medicine"],
+                                    "availability": "24/7" if center["type"] == "hospital" else "Weekdays",
+                                    "description": f"Healthcare facility near {location}"
+                                })
+                        
+                        if converted_hospitals:
+                            result = {
+                                "hospitals": converted_hospitals[:6],
+                                "suggestedSpecialty": None,
+                                "totalFound": len(converted_hospitals),
+                                "searchLocation": location,
+                                "userCoordinates": {"latitude": user_lat, "longitude": user_lng},
+                                "fromNearbySearch": True
+                            }
+                        else:
+                            return jsonify({"error": "No hospitals found in the specified location"}), 404
+                    else:
+                        return jsonify({"error": "No hospitals found in the specified location"}), 404
+                else:
+                    return jsonify({"error": "No hospitals found in the specified location"}), 404
         
         # Cache the result
         set_cache(cache_key, result)
@@ -887,7 +1071,8 @@ def find_hospitals():
         return jsonify(result)
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Hospital search error: {e}")
+        return jsonify({"error": "Internal server error occurred while searching for hospitals"}), 500
 
 @app.route("/bookings", methods=["POST"])
 def create_booking():
@@ -959,23 +1144,56 @@ def get_booking(booking_id):
 
 @app.route("/health-centers", methods=["POST"])
 def find_health_centers():
+    """Enhanced health centers endpoint with improved geolocation"""
     try:
         data = request.json
         latitude = data.get("latitude")
         longitude = data.get("longitude")
+        max_distance = data.get("max_distance", 25)  # Default 25km
+        max_results = data.get("max_results", 20)    # Default 20 results
+        
         if not latitude or not longitude:
             return jsonify({"error": "Latitude and longitude are required"}), 400
-        health_centers = get_nearest_health_centers(latitude, longitude)
-        if "error" in health_centers:
-            return jsonify(health_centers), 400
-        if health_centers:
+            
+        # Validate coordinates
+        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+            return jsonify({"error": "Invalid coordinates provided"}), 400
+            
+        # Get health centers with enhanced parameters
+        health_centers = get_nearest_health_centers(latitude, longitude, max_distance, max_results)
+        
+        if isinstance(health_centers, dict) and "error" in health_centers:
+            return jsonify(health_centers), 404
+            
+        if health_centers and len(health_centers) > 0:
+            # Get route to nearest health center
             first_center = health_centers[0]
             route = get_route(latitude, longitude, first_center["latitude"], first_center["longitude"])
-            return jsonify({"nearest_health_centers": health_centers, "route": route})
+            
+            # Add metadata
+            response_data = {
+                "nearest_health_centers": health_centers,
+                "route": route,
+                "search_metadata": {
+                    "total_found": len(health_centers),
+                    "search_radius_km": max_distance,
+                    "user_location": {"latitude": latitude, "longitude": longitude},
+                    "nearest_distance_km": health_centers[0]["distance"] if health_centers else None
+                }
+            }
+            
+            return jsonify(response_data)
         else:
-            return jsonify({"error": "No health centers found nearby"})
+            return jsonify({
+                "error": "No health centers found nearby",
+                "suggestion": f"Try expanding search radius beyond {max_distance}km or check if you're in a remote area"
+            }), 404
+            
+    except ValueError as e:
+        return jsonify({"error": f"Invalid input data: {str(e)}"}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Health centers API error: {e}")
+        return jsonify({"error": "Internal server error occurred while searching for health centers"}), 500
 
 @app.route("/news", methods=["POST"])
 def get_news():
