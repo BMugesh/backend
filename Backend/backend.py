@@ -148,6 +148,32 @@ def clean_and_format_response(raw_response):
     formatted_summary = re.sub(r"\n{3,}", "\n\n", summary_part)
     return f"{formatted_articles}\n\n{'-'*100}\n\n{formatted_summary}"
 
+def get_local_health_centers_fallback(latitude, longitude, max_distance=25, max_results=20):
+    """Fallback function using local hospital database when external API is unreachable"""
+    local_results = []
+    
+    for hospital in HOSPITAL_DATABASE:
+        if "latitude" in hospital and "longitude" in hospital:
+            distance = calculate_distance(latitude, longitude, hospital["latitude"], hospital["longitude"])
+            if distance <= max_distance:
+                local_results.append({
+                    "name": hospital["name"],
+                    "address": f"{hospital['location']}, {hospital['state']}",
+                    "latitude": hospital["latitude"],
+                    "longitude": hospital["longitude"],
+                    "distance": round(distance, 2),
+                    "type": "hospital",
+                    "phone": hospital.get("phone", ""),
+                    "website": "",
+                    "opening_hours": hospital.get("availability", ""),
+                    "osm_id": str(hospital.get("id", "")),
+                    "place_id": str(hospital.get("id", ""))
+                })
+    
+    # Sort by distance and limit results
+    local_results.sort(key=lambda x: x["distance"])
+    return local_results[:max_results]
+
 def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results=20):
     """Enhanced function to get nearest health centers with better accuracy"""
     import math
@@ -159,6 +185,7 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
     
     headers = {'User-Agent': 'ArogyaCare-HealthApp/2.0 (Enhanced Geolocation)'}
     all_results = []
+    api_reachable = True
     
     for radius in search_radii:
         if len(all_results) >= max_results:
@@ -206,12 +233,20 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
                 elif response.status_code == 429:  # Rate limited
                     time.sleep(1)
                     continue
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+                print(f"Network error for radius {radius}: {e}")
+                api_reachable = False
+                break  # Stop trying if network is unreachable
             except Exception as e:
                 print(f"Search failed for radius {radius}: {e}")
                 continue
         
         # Break early if we have sufficient results in close proximity
         if len(all_results) >= 5 and radius <= 0.1:
+            break
+            
+        # Break if network is unreachable
+        if not api_reachable:
             break
 
     # Fallback: Search in wider area if no results found
@@ -255,8 +290,17 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
         except Exception as e:
             print(f"Fallback search failed: {e}")
     
+    # If no results and API is unreachable, use local fallback
     if not all_results:
-        return {"error": "No health centers found nearby. Please try expanding your search radius."}
+        if not api_reachable:
+            print("Using local hospital database fallback due to network issues")
+            local_results = get_local_health_centers_fallback(latitude, longitude, max_distance, max_results)
+            if local_results:
+                return local_results
+            else:
+                return {"error": "Network connection failed and no local hospitals found within the specified distance. Please check your internet connection or try expanding the search radius."}
+        else:
+            return {"error": "No health centers found nearby. Please try expanding your search radius."}
     
     # Enhanced result processing with better deduplication
     seen_locations = set()
@@ -838,7 +882,9 @@ HOSPITAL_DATABASE = [
         "state": "Delhi",
         "description": "Advanced super specialty hospital with international standards",
         "beds": 315,
-        "established": 2006
+        "established": 2006,
+        "latitude": 28.6139,
+        "longitude": 77.2090
     },
     {
         "id": 8,
@@ -852,7 +898,9 @@ HOSPITAL_DATABASE = [
         "state": "Maharashtra",
         "description": "Premier cancer treatment and research center",
         "beds": 629,
-        "established": 1941
+        "established": 1941,
+        "latitude": 19.0760,
+        "longitude": 72.8777
     },
     {
         "id": 9,
