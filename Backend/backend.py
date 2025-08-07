@@ -199,7 +199,9 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
                 response = requests.get(search_url, headers=headers, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
-                    all_results.extend(data)
+                    # Ensure data is a list and not None
+                    if data and isinstance(data, list):
+                        all_results.extend(data)
                     time.sleep(0.15)  # Respectful API usage
                 elif response.status_code == 429:  # Rate limited
                     time.sleep(1)
@@ -220,24 +222,35 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
             reverse_response = requests.get(reverse_url, headers=headers, timeout=10)
             if reverse_response.status_code == 200:
                 reverse_data = reverse_response.json()
-                address = reverse_data.get("address", {})
-                
-                # Try searching by city/town name
-                city = address.get("city") or address.get("town") or address.get("village") or address.get("hamlet")
-                state = address.get("state")
-                country = address.get("country")
+                # Add None check for reverse_data
+                if reverse_data and isinstance(reverse_data, dict):
+                    address = reverse_data.get("address", {})
+                    
+                    # Try searching by city/town name (with None checks)
+                    if address and isinstance(address, dict):
+                        city = address.get("city") or address.get("town") or address.get("village") or address.get("hamlet")
+                        state = address.get("state")
+                        country = address.get("country")
+                    else:
+                        city = state = country = None
+                else:
+                    city = state = country = None
                 
                 if city:
                     fallback_search = f"https://nominatim.openstreetmap.org/search?format=json&q=hospital+{city}&limit=10&extratags=1&addressdetails=1"
                     fallback_response = requests.get(fallback_search, headers=headers, timeout=10)
                     if fallback_response.status_code == 200:
-                        all_results.extend(fallback_response.json())
+                        fallback_data = fallback_response.json()
+                        if fallback_data and isinstance(fallback_data, list):
+                            all_results.extend(fallback_data)
                         
                 if state and not all_results:
                     state_search = f"https://nominatim.openstreetmap.org/search?format=json&q=hospital+{state}&limit=10&extratags=1&addressdetails=1"
                     state_response = requests.get(state_search, headers=headers, timeout=10)
                     if state_response.status_code == 200:
-                        all_results.extend(state_response.json())
+                        state_data = state_response.json()
+                        if state_data and isinstance(state_data, list):
+                            all_results.extend(state_data)
                         
         except Exception as e:
             print(f"Fallback search failed: {e}")
@@ -251,6 +264,13 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
     
     for place in all_results:
         try:
+            # Skip if place is None or doesn't have required fields
+            if not place or not isinstance(place, dict):
+                continue
+                
+            if "lat" not in place or "lon" not in place:
+                continue
+                
             place_lat = float(place["lat"])
             place_lon = float(place["lon"])
             
@@ -270,10 +290,10 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
                 address_parts = display_name.split(",")
                 facility_name = address_parts[0].strip()
                 
-                # Extract facility type from tags or name
-                place_type = place.get("type", "")
-                amenity = place.get("amenity", "")
-                healthcare = place.get("healthcare", "")
+                # Extract facility type from tags or name (with None checks)
+                place_type = place.get("type", "") if place else ""
+                amenity = place.get("amenity", "") if place else ""
+                healthcare = place.get("healthcare", "") if place else ""
                 
                 # Determine facility category
                 facility_type = "medical"
@@ -285,18 +305,23 @@ def get_nearest_health_centers(latitude, longitude, max_distance=25, max_results
                     facility_type = "doctor"
                 elif amenity == "pharmacy" or "pharmacy" in facility_name.lower():
                     facility_type = "pharmacy"
-                elif "emergency" in place_type.lower() or "emergency" in facility_name.lower():
+                elif place_type and "emergency" in place_type.lower() or "emergency" in facility_name.lower():
                     facility_type = "emergency"
                 
-                # Extract contact information if available
-                extratags = place.get("extratags", {})
-                phone = extratags.get("phone", "")
-                website = extratags.get("website", "")
-                opening_hours = extratags.get("opening_hours", "")
+                # Extract contact information if available (with None checks)
+                extratags = place.get("extratags") if place else None
+                if extratags and isinstance(extratags, dict):
+                    phone = extratags.get("phone", "")
+                    website = extratags.get("website", "")
+                    opening_hours = extratags.get("opening_hours", "")
+                else:
+                    phone = ""
+                    website = ""
+                    opening_hours = ""
                 
-                # Get full address with proper formatting
-                address_data = place.get("address", {})
-                if address_data:
+                # Get full address with proper formatting (with None checks)
+                address_data = place.get("address") if place else None
+                if address_data and isinstance(address_data, dict):
                     formatted_address = ", ".join(filter(None, [
                         address_data.get("house_number", ""),
                         address_data.get("road", ""),
@@ -1032,6 +1057,7 @@ def find_hospitals():
                 # Try to get nearby hospitals using coordinates
                 if user_lat and user_lng:
                     nearby_centers = get_nearest_health_centers(user_lat, user_lng, 50, 10)
+                    # Check if it's a successful list response (not an error dict)
                     if isinstance(nearby_centers, list) and nearby_centers:
                         # Convert health centers to hospital format
                         converted_hospitals = []
@@ -1192,7 +1218,9 @@ def find_health_centers():
     except ValueError as e:
         return jsonify({"error": f"Invalid input data: {str(e)}"}), 400
     except Exception as e:
+        import traceback
         print(f"Health centers API error: {e}")
+        print(f"Full traceback: {traceback.format_exc()}")
         return jsonify({"error": "Internal server error occurred while searching for health centers"}), 500
 
 @app.route("/news", methods=["POST"])
